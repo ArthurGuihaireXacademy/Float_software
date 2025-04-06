@@ -3,6 +3,7 @@ import time
 import smbus2
 from datetime import datetime
 import os
+from depth_controller import DepthController
 
 # Pin and sensor configuration
 IN1 = 17  # gpio pin for in1
@@ -20,6 +21,22 @@ bus = smbus2.SMBus(1)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
+
+# Initialize depth hold controller
+depth_controller = DepthController(Kp=0.5, Ki=0.05, Kd=0.0, dt=1)
+
+def depth_hold(current_pressure, hold_time_seconds):
+    depth_controller.start_depth_hold(current_pressure)
+    for i in range(int(hold_time_seconds*10)):
+        """Calculate current pressre
+        output = depth_controller.update_depth_hold(pressure)
+        if -0.5 < output < 0.5:
+            pump_stop()
+        elif output <= -0.5:
+            pump_forward()
+        else:
+            pump_backward()
+        """
 
 def reset_sensor():
     bus.write_byte(I2C_ADDRESS, CMD_RESET)
