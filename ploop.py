@@ -26,20 +26,26 @@ GPIO.setup(IN2, GPIO.OUT)
 DEPTH_HOLD_TIME_STEP = 0.1
 depth_controller = DepthController(Kp=0.5, Ki=0.1, Kd=0.05, dt=DEPTH_HOLD_TIME_STEP)
 
-def depth_hold(prom, current_pressure=1013, hold_time_seconds=3.5):
-    depth_controller.start_depth_hold(current_pressure)
+def depth_hold(target_depth = 1.5, hold_time_seconds=3.5, log_file = None):
+    depth_controller.start_depth_hold(target_depth * 98.1 + 1013) # Conversion meters underwater to milibar
     for i in range(int(hold_time_seconds / DEPTH_HOLD_TIME_STEP)):
         adc_pressure = read_adc(CMD_PRESSURE_CONV)
         adc_temperature = read_adc(CMD_TEMPERATURE_CONV)
-        pressure = calculate_pressure_and_temperature(prom, adc_pressure, adc_temperature)
-        output = depth_controller.update_depth_hold(pressure)
-        if output > 2.5:
-            pump_backward()
-        elif output < -2.5:
-            pump_forward()
+        if adc_pressure and adc_temperature:
+            pressure, temp = calculate_pressure_and_temperature(prom, adc_pressure, adc_temperature)
+            if i%int(1/DEPTH_HOLD_TIME_STEP) == 0:
+                log_data(pressure, temp, log_file)
+            output = depth_controller.update_depth_hold(pressure)
+            if output > 2.5:
+                pump_backward()
+            elif output < -2.5:
+                pump_forward()
+            else:
+                pump_stop()
         else:
             pump_stop()
         time.sleep(DEPTH_HOLD_TIME_STEP)
+    depth_controller.stop_depth_hold()
 
 def reset_sensor():
     bus.write_byte(I2C_ADDRESS, CMD_RESET)
@@ -106,18 +112,19 @@ def read_print(iterations, log_file=None):
         
         if adc_pressure and adc_temperature:
             pressure, temp = calculate_pressure_and_temperature(prom, adc_pressure, adc_temperature)
-            timestamp = datetime.now().isoformat()
-            
-            # Print to console
-            print(f"[{timestamp}] Pressure: {pressure:.2f} kPa")
-            print(f"[{timestamp}] Temperature: {temp:.2f} °C")
-            
-            # Write to file if log_file provided
-            if log_file:
-                log_file.write(f"{timestamp}, {pressure:.2f}, {temp:.2f}\n")
-                log_file.flush()
-        
+            log_data(pressure, temp, log_file)
+
         time.sleep(1)
+
+def log_data(pressure, temp, log_file = None):
+    timestamp = datetime.now().isoformat()
+    print(f"[{timestamp}] Pressure: {pressure:.2f} kPa")
+    print(f"[{timestamp}] Temperature: {temp:.2f} °C")
+            
+    # Write to file if log_file provided
+    if log_file:
+        log_file.write(f"{timestamp}, {pressure:.2f}, {temp:.2f}\n")
+        log_file.flush()
 
 # Initialize sensor
 reset_sensor()
@@ -134,7 +141,7 @@ try:
             pump_forward()
             read_print(5, log_file)
 
-            pump_stop()
+            depth_hold(1.5, 5.0, log_file)
             read_print(1, log_file)
             
             pump_backward()
