@@ -25,7 +25,7 @@ GPIO.setup(IN2, GPIO.OUT)
 # Initialize depth hold controller
 depth_controller = DepthController(Kp=0.5, Ki=0.05, Kd=0.0, dt=1)
 
-def depth_hold(current_pressure=135.6, hold_time_seconds=3.5):
+def depth_hold(current_pressure=1013, hold_time_seconds=3.5):
     depth_controller.start_depth_hold(current_pressure)
     for i in range(int(hold_time_seconds*10)):
         """Calculate current pressre
@@ -36,6 +36,7 @@ def depth_hold(current_pressure=135.6, hold_time_seconds=3.5):
             pump_forward()
         else:
             pump_backward()
+        time.sleep(0.1)
         """
 
 def reset_sensor():
