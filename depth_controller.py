@@ -29,6 +29,6 @@ class DepthController:
             self.pressure = current_pressure
             error = self.target_pressure - current_pressure
             self.integral += error * self.dt
-            return self.dt * (self.Kp * error + self.Ki * self.integral - self.Kd * derivative)
+            return self.Kp * error + self.Ki * self.integral - self.Kd * derivative
         else:
             return 0
