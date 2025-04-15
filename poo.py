@@ -3,6 +3,7 @@ import time
 import smbus2
 from datetime import datetime
 import os
+from depth_controller import DepthController
 
 # Pin and sensor configuration
 IN1 = 17  # gpio pin for in1
@@ -26,6 +27,28 @@ bus = smbus2.SMBus(1)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
+
+DEPTH_HOLD_TIME_STEP = 0.2
+depth_controller = DepthController(Kp=10.0, Ki=5.0, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
+
+def depth_hold(target_depth = 2.5, hold_time_seconds=45):
+    depth_controller.start_depth_hold(target_depth) # Conversion meters underwater to milibar
+    for i in range(int(hold_time_seconds / DEPTH_HOLD_TIME_STEP)):
+        pressure, temp, depth = read_pressure_and_depth()
+        if depth:
+            if i%int(1/DEPTH_HOLD_TIME_STEP) == 0:
+                print(f"Depth: {depth:.2f}m")
+            output = depth_controller.update_depth_hold(depth)
+            if output > 1:
+                pump_backward()
+            elif output < -1:
+                pump_forward()
+            else:
+                pump_stop()
+        else:
+            pump_stop()
+        time.sleep(DEPTH_HOLD_TIME_STEP)
+    depth_controller.stop_depth_hold()
 
 def reset_sensor():
     bus.write_byte(I2C_ADDRESS, CMD_RESET)
@@ -133,6 +156,7 @@ try:
         # Step 2: Hover for 45 seconds
         #print("||| Hovering at 2.5m for 45 seconds")
         #time.sleep(HOVER_TIME)
+        depth_hold(target_depth=2.5, hold_time_seconds=45)
 
         # Step 3: Descend to bottom
         print(">>> Descending to bottom")
