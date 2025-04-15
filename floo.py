@@ -2,8 +2,19 @@ import RPi.GPIO as GPIO
 import time
 import smbus2
 from datetime import datetime
-import os
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
 from depth_controller import DepthController
+
+# InfluxDB configuration
+INFLUXDB_URL = "http://localhost:8086"
+INFLUXDB_TOKEN = "beans:Gauss5050"  # username:password
+INFLUXDB_ORG = "X Academy"
+INFLUXDB_BUCKET = "glaucus"
+
+# Initialize InfluxDB client
+influx_client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
+write_api = influx_client.write_api(write_options=SYNCHRONOUS)
 
 # Pin and sensor configuration
 IN1 = 17  # gpio pin for in1
@@ -28,9 +39,22 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
 
+# Initialize depth hold controller
 DEPTH_HOLD_TIME_STEP = 0.2
 depth_controller = DepthController(Kp=20.0, Ki=5.0, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
 depth_controller.load_calibration_file()
+
+def write_to_influxdb(pressure, temperature, depth):
+    point = Point("pressure_reading") \
+        .field("pressure_kpa", pressure) \
+        .field("temperature_c", temperature) \
+        .field("depth_m", depth) \
+        .time(datetime.utcnow(), WritePrecision.NS)
+    
+    try:
+        write_api.write(INFLUXDB_BUCKET, INFLUXDB_ORG, point)
+    except Exception as e:
+        print(f"Error writing to InfluxDB: {e}")
 
 def depth_hold(target_depth = 2.5, hold_time_seconds=45):
     depth_controller.start_depth_hold(target_depth) # Conversion meters underwater to milibar
@@ -113,6 +137,7 @@ def read_pressure_and_depth():
     if adc_pressure and adc_temperature:
         pressure, temp = calculate_pressure_and_temperature(prom, adc_pressure, adc_temperature)
         depth = calculate_depth(pressure)
+        write_to_influxdb(pressure, temp, depth)  # Log every reading to InfluxDB
         return pressure, temp, depth
     return None, None, None
 
@@ -146,34 +171,30 @@ prom = read_prom()
 
 # Main program
 try:
-    with open('/home/beans/sensor_data.txt', 'a') as log_file:
-        if os.path.getsize('/home/beans/sensor_data.txt') == 0:
-            log_file.write("timestamp, pressure_kpa, temperature_c, depth_m\n")
+    # Step 1: Descend to 2.5m
+    print(">>> Descending to 2.5m")
+    reach_target_depth(HOVER_DEPTH)
+    
+    # Step 2: Hover for 45 seconds
+    print("||| Hovering at 2.5m for 45 seconds")
+    #time.sleep(HOVER_TIME)
+    depth_hold(target_depth=2.5, hold_time_seconds=45)
 
-        # Step 1: Descend to 2.5m
-        print(">>> Descending to 2.5m")
-        reach_target_depth(HOVER_DEPTH)
-        
-        # Step 2: Hover for 45 seconds
-        print("||| Hovering at 2.5m for 45 seconds")
-        #time.sleep(HOVER_TIME)
-        depth_hold(target_depth=2.5, hold_time_seconds=45)
+    # Step 3: Descend to bottom
+    print(">>> Descending to bottom")
+    reach_target_depth(3.65)  # Adjust based on pool depth
 
-        # Step 3: Descend to bottom
-        print(">>> Descending to bottom")
-        reach_target_depth(3.65)  # Adjust based on pool depth
+    # Step 4: Ascend to surface
+    print("<<< Ascending to surface")
+    ascend_to_surface()
 
-        # Step 4: Ascend to surface
-        print("<<< Ascending to surface")
-        ascend_to_surface()
+    # Step 5: Descend again
+    print(">>> Descending to bottom again")
+    reach_target_depth(3.65)
 
-        # Step 5: Descend again
-        print(">>> Descending to bottom again")
-        reach_target_depth(3.65)
-
-        # Step 6: Ascend to surface again
-        print("<<< Ascending to surface")
-        ascend_to_surface()
+    # Step 6: Ascend to surface again
+    print("<<< Ascending to surface")
+    ascend_to_surface()
 
 except KeyboardInterrupt:
     print("\nProgram stopped by user")
@@ -182,4 +203,5 @@ except Exception as e:
 finally:
     GPIO.cleanup()
     bus.close()
+    influx_client.close()
     print("Hardware resources released")
