@@ -29,7 +29,8 @@ GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
 
 DEPTH_HOLD_TIME_STEP = 0.2
-depth_controller = DepthController(Kp=10.0, Ki=5.0, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
+depth_controller = DepthController(Kp=20.0, Ki=5.0, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
+depth_controller.load_calibration_file()
 
 def depth_hold(target_depth = 2.5, hold_time_seconds=45):
     depth_controller.start_depth_hold(target_depth) # Conversion meters underwater to milibar
@@ -154,7 +155,7 @@ try:
         reach_target_depth(HOVER_DEPTH)
         
         # Step 2: Hover for 45 seconds
-        #print("||| Hovering at 2.5m for 45 seconds")
+        print("||| Hovering at 2.5m for 45 seconds")
         #time.sleep(HOVER_TIME)
         depth_hold(target_depth=2.5, hold_time_seconds=45)
 
