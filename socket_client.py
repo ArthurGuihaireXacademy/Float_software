@@ -1,10 +1,22 @@
 import socket
 import queue
 import pickle
+import time
 packet_queue = queue.Queue()
-host, port = '127.0.0.1', 9876
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((host, port))
+port = 9876
+
+def connect(ip):
+    global client
+    while True:
+        try:
+            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client.connect((ip, port))
+        except Exception as e:
+            print(e)
+            print("Connection failed, trying again in 1 second...")
+            time.sleep(1)
+        else:
+            break
 
 def add_packet(data_packet):
     packet_queue.put(data_packet)
@@ -18,10 +30,9 @@ def send_packets():
 
     except Exception as e:
         print(e)
+        disconnect()
+        connect()
         send_packets()
 
-add_packet("Depth: 0.5 m")
-add_packet("Depth: 1.0 m")
-add_packet("Depth: 1.5 m")
-send_packets()
-client.close()
+def disconnect():
+    client.close()

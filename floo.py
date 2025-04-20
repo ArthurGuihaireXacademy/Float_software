@@ -1,207 +1,226 @@
-import RPi.GPIO as GPIO
+import depth_hold
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+
+import socket
 import time
-import smbus2
+import RPi.GPIO as GPIO
+import threading
+import csv
+import os
 from datetime import datetime
-from influxdb_client import InfluxDBClient, Point, WritePrecision
-from influxdb_client.client.write_api import SYNCHRONOUS
-from depth_controller import DepthController
+import ms5837
+import socket_client
 
-# InfluxDB configuration
-INFLUXDB_URL = "http://localhost:8086"
-INFLUXDB_TOKEN = "beans:Gauss5050"  # username:password
-INFLUXDB_ORG = "X Academy"
-INFLUXDB_BUCKET = "glaucus"
+# === Client Socket Setup ===
+TOPSIDE_SERVER_IP = '192.168.1.0'  # Replace with your computer's IP
+TOPSIDE_SERVER_PORT = 8099
+TEAM_CODE = 'FLOAT-TEAM-001'
 
-# Initialize InfluxDB client
-influx_client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
-write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+client_socket = None
 
-# Pin and sensor configuration
-IN1 = 17  # gpio pin for in1
-IN2 = 18  # gpio pin for in2
-I2C_ADDRESS = 0x76  # bar02 sensor i2c address
+# === Motor Pins ===
+IN1 = 17
+IN2 = 18
+target_depth = 1035
+y = 1013.25
+# === Logging ===
+pressure_log_running = True
+pressure_log_file = "pressure_data.csv"
 
-# Sensor commands
-CMD_RESET = 0x1E
-CMD_ADC_READ = 0x00
-CMD_PRESSURE_CONV = 0x40
-CMD_TEMPERATURE_CONV = 0x50
-
-# Constants
-SURFACE_PRESSURE_KPA = 101.325  # Adjust based on local pressure
-GRAVITY = 9.81  # m/s^2
-HOVER_DEPTH = 2.5  # Depth in meters
-HOVER_TIME = 45  # Hover time in seconds
-
-# Initialize hardware
-bus = smbus2.SMBus(1)
+# === GPIO Setup ===
+GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(IN1, GPIO.OUT)
 GPIO.setup(IN2, GPIO.OUT)
 
-# Initialize depth hold controller
-DEPTH_HOLD_TIME_STEP = 0.2
-depth_controller = DepthController(Kp=20.0, Ki=2.5, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
-depth_controller.load_calibration_file()
+# === Pressure Sensor Init ===
+ext_pressure_sensor = ms5837.MS5837_02BA(bus=1)
+ext_pressure_sensor.init()
+initial_pressure_offset = 0
 
-def write_to_influxdb(pressure, temperature, depth):
-    point = Point("pressure_reading") \
-        .field("pressure_kpa", pressure) \
-        .field("temperature_c", temperature) \
-        .field("depth_m", depth) \
-        .time(datetime.utcnow(), WritePrecision.NS)
-    
-    try:
-        write_api.write(INFLUXDB_BUCKET, INFLUXDB_ORG, point)
-    except Exception as e:
-        print(f"Error writing to InfluxDB: {e}")
+# === Logging and Time ===
+def get_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def depth_hold(target_depth = 2.5, hold_time_seconds=45):
-    depth_controller.start_depth_hold(target_depth) # Conversion meters underwater to milibar
-    for i in range(int(hold_time_seconds / DEPTH_HOLD_TIME_STEP)):
-        pressure, temp, depth = read_pressure_and_depth()
-        if depth:
-            if i%int(1/DEPTH_HOLD_TIME_STEP) == 0:
-                print(f"Depth: {depth:.2f}m")
-            output = depth_controller.update_depth_hold(depth)
-            if output > 1:
-                pump_backward()
-            elif output < -1:
-                pump_forward()
-            else:
-                pump_stop()
-        else:
-            pump_stop()
-        time.sleep(DEPTH_HOLD_TIME_STEP)
-    depth_controller.stop_depth_hold()
+def log_message(message):
+    timestamp = get_timestamp()
+    print(f"[{timestamp}] {message}")
 
-def reset_sensor():
-    bus.write_byte(I2C_ADDRESS, CMD_RESET)
-    time.sleep(0.5)
+# === Sensor Calibration ===
+def calibrate_sensor():
+    global initial_pressure_offset
+    log_message("Calibrating surface pressure...")
+    pressures = []
+    for _ in range(10):
+        ext_pressure_sensor.read()
+        pressures.append(ext_pressure_sensor.pressure())
+        time.sleep(0.2)
+    if pressures:
+        initial_pressure_offset = sum(pressures) / len(pressures)
+        log_message(f"Calibrated surface pressure: {initial_pressure_offset:.2f} mbar")
 
-def read_prom():
-    prom = []
-    for i in range(8):
+# === Depth Calculation ===
+def get_depth():
+    ext_pressure_sensor.read()
+    time.sleep(1)
+    current_pressure = ext_pressure_sensor.pressure()  # in mbar
+    depth_m = max(0.0, (current_pressure - initial_pressure_offset) / 98.1)  # mbar to m
+    return current_pressure
+
+# === Pressure Logger Thread ===
+def pressure_logger():
+    global pressure_log_running
+    if not os.path.exists(pressure_log_file):
+        with open(pressure_log_file, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Timestamp", "Depth_meters"])
+
+    while pressure_log_running:
         try:
-            data = bus.read_i2c_block_data(I2C_ADDRESS, 0xA0 + (i * 2), 2)
-            word = (data[0] << 8) | data[1]
-            prom.append(word)
+            depth = get_depth()
+            timestamp = get_timestamp()
+            log_message(f"Logged Depth: {depth:.3f} m")
+            with open(pressure_log_file, mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([timestamp, f"{depth:.3f}"])
         except Exception as e:
-            prom.append(0)
-    return prom
+            log_message(f"Error logging depth: {e}")
+        time.sleep(1)
 
-def read_adc(cmd):
-    try:
-        bus.write_byte(I2C_ADDRESS, cmd)
-        time.sleep(0.01)
-        adc_bytes = bus.read_i2c_block_data(I2C_ADDRESS, CMD_ADC_READ, 3)
-        return (adc_bytes[0] << 16) | (adc_bytes[1] << 8) | adc_bytes[2]
-    except IOError:
-        reset_i2c()
-        return 0
-
-def reset_i2c():
-    global bus
-    bus.close()
-    time.sleep(0.1)
-    bus = smbus2.SMBus(1)
-
-def calculate_pressure_and_temperature(prom, adc_pressure, adc_temperature):
-    C1, C2, C3, C4, C5, C6 = prom[1:7]
-    dT = adc_temperature - (C5 << 8)
-    TEMP = 2000 + (dT * C6 >> 23)
-    OFF = (C2 << 17) + ((C4 * dT) >> 6)
-    SENS = (C1 << 16) + ((C3 * dT) >> 7)
-    P = ((adc_pressure * SENS >> 21) - OFF) >> 15
-    return P / 1000.0, TEMP / 100.0
-
-def calculate_depth(pressure_kpa):
-    return max(0, (pressure_kpa - SURFACE_PRESSURE_KPA) * 100 / GRAVITY)
-
-def pump_forward():
-    GPIO.output(IN1, GPIO.LOW)
-    GPIO.output(IN2, GPIO.HIGH)
-
-def pump_backward():
+# === Motor Control ===
+def descend(duration=9):
+    log_message("Descending...")
     GPIO.output(IN1, GPIO.HIGH)
     GPIO.output(IN2, GPIO.LOW)
-
-def pump_stop():
+    time.sleep(duration)
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.LOW)
+    log_message("Descent complete")
 
-def read_pressure_and_depth():
-    adc_pressure = read_adc(CMD_PRESSURE_CONV)
-    adc_temperature = read_adc(CMD_TEMPERATURE_CONV)
+def ascend(duration=15):
+    log_message("Ascending...")
+    GPIO.output(IN1, GPIO.LOW)
+    GPIO.output(IN2, GPIO.HIGH)
+    time.sleep(duration)
+    GPIO.output(IN1, GPIO.LOW)
+    GPIO.output(IN2, GPIO.LOW)
+    log_message("Ascent complete")
+def hold_depth(y, target_depth):
+    log_message(f"Starting depth hold at {target_depth} meters...")
+
+    PID_holder = depth_hold.PID_controller()
+    PID_holder.start_depth_hold(y, target_depth)
+
+    dt = 1  # control loop interval (s)
+    hold_duration = 20 # seconds to hold depth
+    elapsed = 0
+
+    try:
+        while elapsed < hold_duration:
+            current_depth = get_depth()
+            time.sleep(1)
+            pid_output = PID_holder.update_depth_hold(current_depth)
+
+            log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+
+            if pid_output > 0.5:  # Too shallow ? descend
+                log_message(f"[Depth Decends] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+                GPIO.output(IN1, GPIO.HIGH)
+                GPIO.output(IN2, GPIO.LOW)
+                
+            elif pid_output < -0.5:  # Too deep ? ascend
+                log_message(f"[Depth Acending] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+                GPIO.output(IN1, GPIO.LOW)
+                GPIO.output(IN2, GPIO.HIGH)
+            else:  # Within acceptable range ? hold
+                log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+                GPIO.output(IN1, GPIO.LOW)
+                GPIO.output(IN2, GPIO.LOW)
+
+            time.sleep(dt)
+            elapsed += dt
+            print(elapsed)
+
+        log_message("Depth hold complete.")
+    finally:
+        # Stop the motors when done
+        GPIO.output(IN1, GPIO.LOW)
+        GPIO.output(IN2, GPIO.LOW)
+        PID_holder.stop_depth_hold()
+
+# === Socket Comms ===
+def connect_to_topside():
+    global client_socket
+    try:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((TOPSIDE_SERVER_IP, TOPSIDE_SERVER_PORT))
+        log_message("Connected to topside server.")
+
+        timestamp = get_timestamp()
+        depth = get_depth()
+
+        data = f"CONNECTED\nTime: {timestamp}\nTeam: {TEAM_CODE}\nDepth: {depth:.2f} m\n"
+        client_socket.sendall(data.encode())
+
+    except Exception as e:
+        log_message(f"Failed to connect to server: {e}")
+        client_socket = None
+
+def send_csv_to_topside():
+    if client_socket is None:
+        log_message("No socket connection. Skipping CSV send.")
+        return
+
+    try:
+        if not os.path.exists(pressure_log_file):
+            log_message("CSV file not found.")
+            return
+
+        with open(pressure_log_file, "rb") as f:
+            content = f.read()
+            client_socket.sendall(b"CSV_START\n")
+            time.sleep(0.5)
+            client_socket.sendall(content)
+            time.sleep(0.5)
+            client_socket.sendall(b"\nCSV_END\n")
+            log_message("CSV file sent to topside.")
+    except Exception as e:
+        log_message(f"Error sending CSV: {e}")
+
+# === Main Sequence ===
+def main_sequence():
+    global pressure_log_running
+    for i in range(1):
+        log_message("Float waiting at surface...")
+
+        connect_to_topside()
+        time.sleep(5)
+
+        calibrate_sensor()
+
+        logger_thread = threading.Thread(target=pressure_logger)
+        logger_thread.start()
+
+        descend()
+        time.sleep(2)
+
+        hold_depth(y,target_depth) # Optional: add your depth hold logic here
+        print("held")
+        ascend()
+        time.sleep(2)
+
+        send_csv_to_topside()
+        log_message("Profile sequence complete.")
+
     
-    if adc_pressure and adc_temperature:
-        pressure, temp = calculate_pressure_and_temperature(prom, adc_pressure, adc_temperature)
-        depth = calculate_depth(pressure)
-        write_to_influxdb(pressure, temp, depth)  # Log every reading to InfluxDB
-        return pressure, temp, depth
-    return None, None, None
-
-def reach_target_depth(target_depth):
-    """Descend until reaching a specified depth."""
-    while True:
-        pressure, temp, depth = read_pressure_and_depth()
-        print(f"Depth: {depth:.2f}m | Target: {target_depth}m")
-
-        if depth >= target_depth:
-            pump_stop()
-            break
-        pump_forward()
-        time.sleep(1)
-
-def ascend_to_surface():
-    """Ascend until reaching the surface."""
-    while True:
-        pressure, temp, depth = read_pressure_and_depth()
-        print(f"Depth: {depth:.2f}m | Target: Surface")
-
-        if depth <= 0.2:  # Allow small buffer
-            pump_stop()
-            break
-        pump_backward()
-        time.sleep(1)
-
-# Initialize sensor
-reset_sensor()
-prom = read_prom()
-
-# Main program
-try:
-    # Step 1: Descend to 2.5m
-    print(">>> Descending to 2.5m")
-    reach_target_depth(HOVER_DEPTH)
-    
-    # Step 2: Hover for 45 seconds
-    print("||| Hovering at 2.5m for 45 seconds")
-    #time.sleep(HOVER_TIME)
-    depth_hold(target_depth=2.5, hold_time_seconds=45)
-
-    # Step 3: Descend to bottom
-    print(">>> Descending to bottom")
-    reach_target_depth(3.65)  # Adjust based on pool depth
-
-    # Step 4: Ascend to surface
-    print("<<< Ascending to surface")
-    ascend_to_surface()
-
-    # Step 5: Descend again
-    print(">>> Descending to bottom again")
-    reach_target_depth(3.65)
-
-    # Step 6: Ascend to surface again
-    print("<<< Ascending to surface")
-    ascend_to_surface()
-
-except KeyboardInterrupt:
-    print("\nProgram stopped by user")
-except Exception as e:
-    print(f"\nError occurred: {e}")
-finally:
+    pressure_log_running = False
+    if client_socket:
+        client_socket.close()
+    logger_thread.join()
     GPIO.cleanup()
-    bus.close()
-    influx_client.close()
-    print("Hardware resources released")
+    log_message("Shutdown complete.")
+
+if __name__ == "__main__":
+    main_sequence()

@@ -7,4 +7,5 @@ def graph_data(x_array, y_array):
     plt.grid(True)
     plt.show()
 
-graph_data([1,2,3,4,5], [0,3,5,3,0])
+if __name__ == "__main__":
+    graph_data([1,2,3,4,5], [0,3,5,3,0])
