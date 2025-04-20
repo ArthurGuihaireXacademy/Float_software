@@ -41,7 +41,7 @@ GPIO.setup(IN2, GPIO.OUT)
 
 # Initialize depth hold controller
 DEPTH_HOLD_TIME_STEP = 0.2
-depth_controller = DepthController(Kp=20.0, Ki=5.0, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
+depth_controller = DepthController(Kp=20.0, Ki=2.5, Kd=1.0, dt=DEPTH_HOLD_TIME_STEP)
 depth_controller.load_calibration_file()
 
 def write_to_influxdb(pressure, temperature, depth):
