@@ -5,7 +5,7 @@ import random
 
 import socket
 import time
-import RPi.GPIO as GPIO
+import disable_GPIO as GPIO
 import threading
 import csv
 import os
@@ -21,8 +21,7 @@ TEAM_CODE = 'FLOAT-TEAM-001'
 # === Motor Pins ===
 IN1 = 17
 IN2 = 18
-target_depth = 1035
-y = 1013.25
+target_depth = 0.2
 # === Logging ===
 pressure_log_running = True
 pressure_log_file = "pressure_data.csv"
@@ -67,7 +66,7 @@ def get_depth():
     time.sleep(1)
     current_pressure = ext_pressure_sensor.pressure()  # in mbar
     depth_m = max(0.0, (current_pressure - initial_pressure_offset) / 98.1)  # mbar to m
-    return current_pressure
+    return depth_m
 
 # === Pressure Logger Thread ===
 def pressure_logger():
@@ -175,12 +174,13 @@ def main_sequence():
         descend()
         time.sleep(2)
 
-        hold_depth(y,target_depth) # Optional: add your depth hold logic here
+        hold_depth(get_depth(), target_depth) # Optional: add your depth hold logic here
         print("held")
         ascend()
         time.sleep(2)
 
         log_message("Profile sequence complete.", False)
+        add_packet("done")
         send_packets()
 
     
