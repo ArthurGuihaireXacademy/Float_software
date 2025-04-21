@@ -38,7 +38,7 @@ while True:
 timestamp_array = []
 depth_array = []
 print("Deconstructed values:")
-for packet in data_array:
+for packet in data_array[1:]:
     time_str, depth_str = packet.split("] Logged Depth: ")
     timestamp = datetime.strptime(time_str.replace("[", ""), "%Y-%m-%d %H:%M:%S")
     timestamp_array.append(timestamp)

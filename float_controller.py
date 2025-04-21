@@ -63,7 +63,6 @@ def calibrate_sensor():
 # === Depth Calculation ===
 def get_depth():
     ext_pressure_sensor.read()
-    time.sleep(1)
     current_pressure = ext_pressure_sensor.pressure()  # in mbar
     depth_m = max(0.0, (current_pressure - initial_pressure_offset) / 98.1)  # mbar to m
     return depth_m
@@ -106,6 +105,7 @@ def ascend(duration=15):
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.LOW)
     log_message("Ascent complete", False)
+    
 def hold_depth(y, target_depth):
     log_message(f"Starting depth hold at {target_depth} meters...", False)
 
@@ -121,19 +121,14 @@ def hold_depth(y, target_depth):
             current_depth = get_depth()
             pid_output = PID_holder.update_depth_hold(current_depth)
 
-            log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
-
             if pid_output > 0.5:  # Too shallow ? descend
-                log_message(f"[Depth Decends] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.HIGH)
                 GPIO.output(IN2, GPIO.LOW)
                 
             elif pid_output < -0.5:  # Too deep ? ascend
-                log_message(f"[Depth Acending] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.LOW)
                 GPIO.output(IN2, GPIO.HIGH)
             else:  # Within acceptable range ? hold
-                log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.LOW)
                 GPIO.output(IN2, GPIO.LOW)
 
@@ -183,7 +178,6 @@ def main_sequence():
         add_packet("done")
         send_packets()
 
-    
     pressure_log_running = False
     logger_thread.join()
     GPIO.cleanup()
