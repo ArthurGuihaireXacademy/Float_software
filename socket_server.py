@@ -2,6 +2,7 @@ import socket
 import pickle
 from graph_data import graph_data
 import time
+from datetime import datetime
 host, port = '0.0.0.0', 9876
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -34,14 +35,17 @@ while True:
     if handle_connection():
         break
 
-time_array = []
+timestamp_array = []
 depth_array = []
 print("Deconstructed values:")
 for packet in data_array:
-    time_str, depth_str = packet.split(", ")
-    time_value = float(time_str.split(": ")[1])
-    time_array.append(time_value)
-    depth_value = float(depth_str.split(": ")[1].replace(" m", ""))
+    time_str, depth_str = packet.split("] Logged Depth: ")
+    timestamp = datetime.strptime(time_str.replace("[", ""), "%Y-%m-%d %H:%M:%S")
+    timestamp_array.append(timestamp)
+    depth_value = float(depth_str.replace(" m", ""))
     depth_array.append(depth_value)
 
-graph_data(time_array, depth_array)
+start_time = timestamp_array[0]
+time_since_start = [(t - start_time).total_seconds() for t in timestamp_array]
+print(time_since_start[1])
+graph_data(time_since_start, depth_array)

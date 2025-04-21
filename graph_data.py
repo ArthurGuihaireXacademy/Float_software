@@ -2,9 +2,10 @@ import matplotlib.pyplot as plt
 
 def graph_data(x_array, y_array):
     plt.plot(x_array, y_array)
-    plt.xlabel("Time")
-    plt.ylabel("Depth")
+    plt.xlabel("Time Since Start (s)")
+    plt.ylabel("Depth (m)")
     plt.grid(True)
+    plt.savefig("float_depth_graph.png")
     plt.show()
 
 if __name__ == "__main__":

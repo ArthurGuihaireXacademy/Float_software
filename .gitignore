@@ -1,1 +1,3 @@
 .vscode
+__pycache__
+float_depth_graph.png

@@ -18,8 +18,6 @@ TOPSIDE_SERVER_IP = '192.168.1.160'  # Replace with your computer's IP
 TOPSIDE_SERVER_PORT = 8099
 TEAM_CODE = 'FLOAT-TEAM-001'
 
-client_socket = None
-
 # === Motor Pins ===
 IN1 = 17
 IN2 = 18
@@ -44,15 +42,16 @@ initial_pressure_offset = 0
 def get_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def log_message(message):
+def log_message(message, send_to_topside):
     timestamp = get_timestamp()
     print(f"[{timestamp}] {message}")
-    socket_client.add_packet(f"[{timestamp}] {message}")
+    if send_to_topside:
+        socket_client.add_packet(f"[{timestamp}] {message}")
 
 # === Sensor Calibration ===
 def calibrate_sensor():
     global initial_pressure_offset
-    log_message("Calibrating surface pressure...")
+    log_message("Calibrating surface pressure...", False)
     pressures = []
     for _ in range(10):
         ext_pressure_sensor.read()
@@ -60,7 +59,7 @@ def calibrate_sensor():
         time.sleep(0.2)
     if pressures:
         initial_pressure_offset = sum(pressures) / len(pressures)
-        log_message(f"Calibrated surface pressure: {initial_pressure_offset:.2f} mbar")
+        log_message(f"Calibrated surface pressure: {initial_pressure_offset:.2f} mbar", False)
 
 # === Depth Calculation ===
 def get_depth():
@@ -82,37 +81,36 @@ def pressure_logger():
         try:
             depth = get_depth()
             timestamp = get_timestamp()
-            log_message(f"Logged Depth: {depth:.3f} m")
+            log_message(f"Logged Depth: {depth:.3f} m", True)
             with open(pressure_log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([timestamp, f"{depth:.3f}"])
-                socket_client.add_packet(f"Time: {timestamp}, Depth: {depth:.3f}")
         except Exception as e:
-            log_message(f"Error logging depth: {e}")
+            log_message(f"Error logging depth: {e}", False)
         time.sleep(1)
 
 # === Motor Control ===
 def descend(duration=9):
-    log_message("Descending...")
+    log_message("Descending...", False)
     GPIO.output(IN1, GPIO.HIGH)
     GPIO.output(IN2, GPIO.LOW)
     time.sleep(duration)
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.LOW)
-    log_message("Descent complete")
+    log_message("Descent complete", False)
 
 def ascend(duration=15):
-    log_message("Ascending...")
+    log_message("Ascending...", False)
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.HIGH)
     time.sleep(duration)
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.LOW)
-    log_message("Ascent complete")
+    log_message("Ascent complete", False)
 def hold_depth(y, target_depth):
-    log_message(f"Starting depth hold at {target_depth} meters...")
+    log_message(f"Starting depth hold at {target_depth} meters...", False)
 
-    PID_holder = depth_hold.PID_controller()
+    PID_holder = depth_hold.PID_controller(20, 0.5, 2.5)
     PID_holder.start_depth_hold(y, target_depth)
 
     dt = 1  # control loop interval (s)
@@ -122,22 +120,21 @@ def hold_depth(y, target_depth):
     try:
         while elapsed < hold_duration:
             current_depth = get_depth()
-            time.sleep(1)
             pid_output = PID_holder.update_depth_hold(current_depth)
 
-            log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+            log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
 
             if pid_output > 0.5:  # Too shallow ? descend
-                log_message(f"[Depth Decends] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+                log_message(f"[Depth Decends] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.HIGH)
                 GPIO.output(IN2, GPIO.LOW)
                 
             elif pid_output < -0.5:  # Too deep ? ascend
-                log_message(f"[Depth Acending] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+                log_message(f"[Depth Acending] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.LOW)
                 GPIO.output(IN2, GPIO.HIGH)
             else:  # Within acceptable range ? hold
-                log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}")
+                log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.LOW)
                 GPIO.output(IN2, GPIO.LOW)
 
@@ -145,7 +142,7 @@ def hold_depth(y, target_depth):
             elapsed += dt
             print(elapsed)
 
-        log_message("Depth hold complete.")
+        log_message("Depth hold complete.", False)
     finally:
         # Stop the motors when done
         GPIO.output(IN1, GPIO.LOW)
@@ -165,7 +162,7 @@ def add_packet(packet):
 def main_sequence():
     global pressure_log_running
     for i in range(1):
-        log_message("Float waiting at surface...")
+        log_message("Float waiting at surface...", False)
 
         calibrate_sensor()
 
@@ -183,16 +180,14 @@ def main_sequence():
         ascend()
         time.sleep(2)
 
-        log_message("Profile sequence complete.")
+        log_message("Profile sequence complete.", False)
         send_packets()
 
     
     pressure_log_running = False
-    if client_socket:
-        client_socket.close()
     logger_thread.join()
     GPIO.cleanup()
-    log_message("Shutdown complete.")
+    log_message("Shutdown complete.", False)
 
 if __name__ == "__main__":
     main_sequence()
