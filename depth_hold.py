@@ -1,6 +1,6 @@
 from pathlib import Path
 
-class DepthController:
+class PID_controller:
     def __init__(self, Kp = 1.2, Ki = 0.15, Kd = 0.15, dt = 0.1):
         self.Kp = Kp
         self.Ki = Ki
@@ -24,23 +24,28 @@ class DepthController:
         if not self.calibrated:
             self.calibrated_integral = self.integral
             self.calibrated = True
+            self.save_calibration_file()
 
     def save_calibration_file(self):
-        file_path = Path.home() / ".config" / "depth_hold_config"
+        file_path = Path.home() / ".config" / "top_side_controller"
         file_path.mkdir(parents=True, exist_ok=True)
         file_path /= "depth_hold_calibration.txt"
         with open(file_path, 'w') as config_file:
-            config_file.write(self.calibrated_integral)
+            config_file.write(str(self.calibrated_integral))
 
     def load_calibration_file(self):
-        file_path = Path.home() / ".config" / "depth_hold_config" / "depth_hold_calibration.txt"
-        if not file_path.exists():
+        file_path = Path.home() / ".config" / "top_side_controller" / "depth_hold_calibration.txt"
+        if file_path.exists():
+            try:
+                with open(file_path, 'r') as config_file:
+                    self.calibrated_integral = float(config_file.read())
+            except:
+                return False
+            else:
+                return True
+        else:
             self.save_calibration_file()
             return False
-        else:
-            with open(file_path, 'r') as config_file:
-                self.calibrated_integral = float(config_file.read())
-            return True
 
     def update_depth_hold(self, current_pressure):
         if self.holding:
@@ -51,3 +56,8 @@ class DepthController:
             return self.dt * (self.Kp * error + self.Ki * self.integral - self.Kd * derivative)
         else:
             return 0
+    
+    def increment_target_depth(self, delta_target_depth_meters):
+        if self.holding:
+            self.target_pressure += delta_target_depth_meters * 9.8
+            print(f"New pressure: {self.target_pressure}")
