@@ -53,6 +53,9 @@ class PID_controller:
             self.pressure = current_pressure
             error = self.target_pressure - current_pressure
             self.integral += error * self.dt
+            print("Depth hold:")
+            print(derivative)
+            print(error)
             return self.dt * (self.Kp * error + self.Ki * self.integral - self.Kd * derivative)
         else:
             return 0

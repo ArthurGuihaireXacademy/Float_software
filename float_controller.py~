@@ -21,7 +21,7 @@ TEAM_CODE = 'FLOAT-TEAM-001'
 # === Motor Pins ===
 IN1 = 17
 IN2 = 18
-target_depth = 0.4
+target_depth = 0.2
 # === Logging ===
 pressure_log_running = True
 pressure_log_file = "pressure_data.csv"
@@ -105,15 +105,15 @@ def ascend(duration=15):
     GPIO.output(IN1, GPIO.LOW)
     GPIO.output(IN2, GPIO.LOW)
     log_message("Ascent complete", False)
-
+    
 def hold_depth(y, target_depth):
     log_message(f"Starting depth hold at {target_depth} meters...", False)
 
-    PID_holder = depth_hold.PID_controller(15.0, 0.1, -20.0)
+    PID_holder = depth_hold.PID_controller(20, 0.5, 2.5)
     PID_holder.start_depth_hold(y, target_depth)
 
     dt = 1  # control loop interval (s)
-    hold_duration = 60 # seconds to hold depth
+    hold_duration = 20 # seconds to hold depth
     elapsed = 0
 
     try:
@@ -123,12 +123,12 @@ def hold_depth(y, target_depth):
 
             log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
 
-            if pid_output > 0.05:  # Too shallow ? descend
+            if pid_output > 0.5:  # Too shallow ? descend
                 log_message(f"[Depth Decends] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.HIGH)
                 GPIO.output(IN2, GPIO.LOW)
-
-            elif pid_output < -0.05:  # Too deep ? ascend
+                
+            elif pid_output < -0.5:  # Too deep ? ascend
                 log_message(f"[Depth Acending] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
                 GPIO.output(IN1, GPIO.LOW)
                 GPIO.output(IN2, GPIO.HIGH)
@@ -164,33 +164,24 @@ def main_sequence():
         log_message("Float waiting at surface...", False)
 
         calibrate_sensor()
+
         add_packet(f"CONNECTED\nTime: {get_timestamp()}\nTeam: {TEAM_CODE}\nDepth: {get_depth():.2f} m\n")
-        threading.Thread(target=send_packets).start()
-        time.sleep(10)
+        send_packets()
 
         logger_thread = threading.Thread(target=pressure_logger)
         logger_thread.start()
 
-        #descend(20)
-        #time.sleep(1)
-        error = True
-        while error:
-            try:
-                global depth
-                depth = get_depth()
-                error = False
-            except:
-                error = True
-                time.sleep(1)
-                print("Depth hold not started")
-        hold_depth(depth, target_depth) # Optional: add your depth hold logic her
+        descend()
+        time.sleep(2)
+
+        hold_depth(get_depth(), target_depth) # Optional: add your depth hold logic here
         print("held")
         ascend()
-        time.sleep(1)
+        time.sleep(2)
 
         log_message("Profile sequence complete.", False)
         add_packet("done")
-        threading.Thread(target=send_packets).start()
+        send_packets()
 
     pressure_log_running = False
     logger_thread.join()
@@ -199,4 +190,3 @@ def main_sequence():
 
 if __name__ == "__main__":
     main_sequence()
-
