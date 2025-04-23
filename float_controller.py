@@ -5,7 +5,11 @@ import random
 
 import socket
 import time
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except:
+    print('GPIO not found, disabling motors')
+    import disable_GPIO as GPIO
 import threading
 import csv
 import os
