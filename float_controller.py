@@ -1,9 +1,4 @@
 import depth_hold
-import numpy as np
-import matplotlib.pyplot as plt
-import random
-
-import socket
 import time
 try:
     import RPi.GPIO as GPIO
@@ -74,10 +69,9 @@ def get_depth():
 # === Pressure Logger Thread ===
 def pressure_logger():
     global pressure_log_running
-    if not os.path.exists(pressure_log_file):
-        with open(pressure_log_file, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(["Timestamp", "Depth_meters"])
+    with open(pressure_log_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["Timestamp", "Depth_meters"])
 
     while pressure_log_running:
         try:
