@@ -15,8 +15,17 @@ ping_packet = pickle.dumps(0)
 
 def handle_connection():
     conn, addr = server.accept()
+    
     print("Connected")
     with conn:
+        while True:
+            try:
+                time_packet = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                conn.sendall(pickle.dumps(time_packet))
+            except Exception as e:
+                print(f"Failed to send time, {str(e)}, trying again in 1 second.")
+            else:
+                break
         while True:
             try:
                 data_packet = conn.recv(1024)

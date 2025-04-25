@@ -7,13 +7,13 @@ except:
     import disable_GPIO as GPIO
 import threading
 import csv
-import os
 from datetime import datetime
 import ms5837
 import socket_client
+import random
 
 # === Client Socket Setup ===
-TOPSIDE_SERVER_IP = '192.168.1.160'  # Replace with your computer's IP
+TOPSIDE_SERVER_IP = '127.0.0.1'#'192.168.1.160'  # Replace with your computer's IP
 TOPSIDE_SERVER_PORT = 8099
 TEAM_CODE = 'FLOAT-TEAM-001'
 
@@ -21,6 +21,7 @@ TEAM_CODE = 'FLOAT-TEAM-001'
 IN1 = 17
 IN2 = 18
 target_depth = 0.4
+current_depth = 0
 # === Logging ===
 pressure_log_running = True
 pressure_log_file = "pressure_data.csv"
@@ -38,7 +39,7 @@ initial_pressure_offset = 0
 
 # === Logging and Time ===
 def get_timestamp():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 def log_message(message, send_to_topside):
     timestamp = get_timestamp()
@@ -60,11 +61,15 @@ def calibrate_sensor():
         log_message(f"Calibrated surface pressure: {initial_pressure_offset:.2f} mbar", False)
 
 # === Depth Calculation ===
-def get_depth():
-    ext_pressure_sensor.read()
-    current_pressure = ext_pressure_sensor.pressure()  # in mbar
-    depth_m = max(0.0, (current_pressure - initial_pressure_offset) / 98.1)  # mbar to m
-    return depth_m
+def update_depth():
+    global current_depth
+    if ext_pressure_sensor.read():
+        current_pressure = ext_pressure_sensor.pressure()  # in mbar
+        current_depth = max(0.0, (current_pressure - initial_pressure_offset) / 98.1)  # mbar to m
+        return True
+    else:
+        current_depth = random.random()
+        return True
 
 # === Pressure Logger Thread ===
 def pressure_logger():
@@ -75,12 +80,11 @@ def pressure_logger():
 
     while pressure_log_running:
         try:
-            depth = get_depth()
             timestamp = get_timestamp()
-            log_message(f"Logged Depth: {depth:.3f} m", True)
+            log_message(f"Logged Depth: {current_depth:.3f} m", True)
             with open(pressure_log_file, mode='a', newline='') as file:
                 writer = csv.writer(file)
-                writer.writerow([timestamp, f"{depth:.3f}"])
+                writer.writerow([timestamp, f"{current_depth:.3f}"])
         except Exception as e:
             log_message(f"Error logging depth: {e}", False)
         time.sleep(1)
@@ -107,16 +111,16 @@ def ascend(duration=15):
 def hold_depth(y, target_depth):
     log_message(f"Starting depth hold at {target_depth} meters...", False)
 
-    PID_holder = depth_hold.PID_controller(15.0, 0.1, -20.0)
+    PID_holder = depth_hold.PID_controller(6, 0, -40)
     PID_holder.start_depth_hold(y, target_depth)
 
-    dt = 1  # control loop interval (s)
+    dt = 0.2  # control loop interval (s)
     hold_duration = 60 # seconds to hold depth
     elapsed = 0
 
     try:
         while elapsed < hold_duration:
-            current_depth = get_depth()
+            update_depth()
             pid_output = PID_holder.update_depth_hold(current_depth)
 
             log_message(f"[Depth Hold] Depth: {current_depth:.2f} m | PID: {pid_output:.2f}", False)
@@ -162,33 +166,27 @@ def main_sequence():
         log_message("Float waiting at surface...", False)
 
         calibrate_sensor()
-        add_packet(f"CONNECTED\nTime: {get_timestamp()}\nTeam: {TEAM_CODE}\nDepth: {get_depth():.2f} m\n")
-        threading.Thread(target=send_packets).start()
-        time.sleep(10)
+        update_depth()
+        add_packet(f"CONNECTED\nTime: {get_timestamp()}\nTeam: {TEAM_CODE}\nDepth: {current_depth:.2f} m\n")
+        send_packets()
+        input('[Press ENTER to start]')
 
         logger_thread = threading.Thread(target=pressure_logger)
         logger_thread.start()
 
         #descend(20)
         #time.sleep(1)
-        error = True
-        while error:
-            try:
-                global depth
-                depth = get_depth()
-                error = False
-            except:
-                error = True
-                time.sleep(1)
-                print("Depth hold not started")
-        hold_depth(depth, target_depth) # Optional: add your depth hold logic her
+        while not update_depth():
+            print("Depth hold not started")
+            time.sleep(0.5)
+        hold_depth(current_depth, target_depth) # Optional: add your depth hold logic her
         print("held")
         ascend()
         time.sleep(1)
 
         log_message("Profile sequence complete.", False)
         add_packet("done")
-        threading.Thread(target=send_packets).start()
+        send_packets()
 
     pressure_log_running = False
     logger_thread.join()

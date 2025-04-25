@@ -2,6 +2,7 @@ import socket
 import queue
 import pickle
 import time
+import subprocess
 packet_queue = queue.Queue()
 port = 9876
 
@@ -16,6 +17,10 @@ def connect(ip):
             print("Connection failed, trying again in 1 second...")
             time.sleep(1)
         else:
+            server_time = pickle.loads(client.recv(1024))
+            '''cmd = f"sudo date -s '{server_time}'"
+            subprocess.run(cmd, shell=True, check=True)'''
+            print(server_time)
             break
 
 def add_packet(data_packet):
