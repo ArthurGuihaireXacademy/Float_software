@@ -13,7 +13,7 @@ import socket_client
 import random
 
 # === Client Socket Setup ===
-TOPSIDE_SERVER_IP = '127.0.0.1'#'192.168.1.160'  # Replace with your computer's IP
+TOPSIDE_SERVER_IP = '192.168.1.160'  # Replace with your computer's IP
 TOPSIDE_SERVER_PORT = 8099
 TEAM_CODE = 'FLOAT-TEAM-001'
 
@@ -69,7 +69,7 @@ def update_depth():
         return True
     else:
         current_depth = random.random()
-        return True
+        return False
 
 # === Pressure Logger Thread ===
 def pressure_logger():
@@ -180,16 +180,16 @@ def main_sequence():
             print("Depth hold not started")
             time.sleep(0.5)
         hold_depth(current_depth, target_depth) # Optional: add your depth hold logic her
-        print("held")
         ascend()
         time.sleep(1)
 
         log_message("Profile sequence complete.", False)
-        add_packet("done")
         send_packets()
 
     pressure_log_running = False
     logger_thread.join()
+    add_packet("done")
+    send_packets()
     GPIO.cleanup()
     log_message("Shutdown complete.", False)
 
